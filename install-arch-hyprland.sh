@@ -2,8 +2,9 @@
 set -e
 
 # ================================
-# Variáveis de usuário
+# VARIÁVEIS DO USUÁRIO
 # ================================
+DISK="/dev/sda"             # HDD SATA alvo (cuidado!)
 USERNAME="italo"
 HOSTNAME="arch-hypr"
 LOCALE="pt_BR.UTF-8"
@@ -11,10 +12,32 @@ TIMEZONE="America/Sao_Paulo"
 KERNEL="linux"
 
 # ================================
-# Partição já deve estar montada em /mnt
-# Exemplo: mount /dev/nvme0n1p2 /mnt
+# 1. PARTIÇÃO E FORMATAÇÃO
 # ================================
+echo "[*] Apagando tabela de partição de $DISK..."
+sgdisk --zap-all $DISK
 
+echo "[*] Criando novas partições..."
+parted -s $DISK mklabel gpt
+parted -s $DISK mkpart EFI fat32 1MiB 513MiB
+parted -s $DISK set 1 esp on
+parted -s $DISK mkpart ROOT ext4 513MiB 100%
+
+EFI_PART="${DISK}1"
+ROOT_PART="${DISK}2"
+
+echo "[*] Formatando partições..."
+mkfs.fat -F32 $EFI_PART
+mkfs.ext4 -F $ROOT_PART
+
+echo "[*] Montando partições..."
+mount $ROOT_PART /mnt
+mkdir -p /mnt/boot
+mount $EFI_PART /mnt/boot
+
+# ================================
+# 2. PACOTES BASE
+# ================================
 echo "[*] Instalando pacotes base..."
 pacstrap -K /mnt base base-devel $KERNEL $KERNEL-firmware \
     networkmanager vim git sudo
@@ -22,7 +45,12 @@ pacstrap -K /mnt base base-devel $KERNEL $KERNEL-firmware \
 echo "[*] Gerando fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
 
+# ================================
+# 3. CHROOT
+# ================================
 arch-chroot /mnt /bin/bash <<EOF
+set -e
+
 echo "[*] Configurando timezone e locale..."
 ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
 hwclock --systohc
@@ -52,12 +80,11 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 echo "[*] Instalando systemd-boot..."
 bootctl install
 
-ROOT_PART=\$(findmnt -no SOURCE /)
 cat <<EOT > /boot/loader/entries/arch.conf
 title   Arch Linux
 linux   /vmlinuz-$KERNEL
 initrd  /initramfs-$KERNEL.img
-options root=\$ROOT_PART rw
+options root=$ROOT_PART rw
 EOT
 
 cat <<EOT > /boot/loader/loader.conf
@@ -77,9 +104,8 @@ echo "[*] Alterando shell padrão para fish..."
 chsh -s /usr/bin/fish $USERNAME
 EOF
 
-echo "[*] Instalação concluída! Agora:"
-echo "1) reboot"
-echo "2) logar com usuário $USERNAME"
-echo "3) instalar yay: git clone https://aur.archlinux.org/yay.git"
-echo "4) yay -S caelestia-meta"
-echo "5) ~/.local/share/caelestia/install.fish --noconfirm"
+echo "[*] Instalação concluída!"
+echo "Reinicie com: reboot"
+echo "Depois logue com '$USERNAME' e siga com:"
+echo "  1) Instalar yay"
+echo "  2) Clonar Caelestia e rodar install.fish"
